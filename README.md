@@ -114,8 +114,8 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 - 部署命令：`npm run deploy:cf`
 - 版本命令：`npx wrangler versions upload`（可选）
 
-并在 **构建 > 变量和机密** 中添加你截图里的这些变量：
-
+并在 **设置 > 构建 > 变量和机密** 中添加这些变量：
+(注意不是 **设置 > 变量和机密**, 而是 **设置 > 构建 > 变量和机密**)
 - `D1_DATABASE_ID`：D1 数据库真实 ID（必须）
 - `ADMIN_PASSWORD`：后台登录密码（必须）
 - `SESSION_SECRET`：会话签名密钥（必须）
