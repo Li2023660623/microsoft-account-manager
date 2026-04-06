@@ -6,6 +6,11 @@ export interface AccountItem {
   refreshToken: string | null;
   remark: string | null;
   createdAt: string;
+  syncStatus: string;
+  syncMessage: string | null;
+  refreshedAt: string | null;
+  fetchedAt: string | null;
+  fetchedCount: number;
 }
 
 export interface AccountPayload {
@@ -29,6 +34,21 @@ export interface IngestConfig {
   passwordField: string;
   clientIdField: string;
   tokenField: string;
+}
+
+export interface BatchActionDetail {
+  id: number;
+  account: string;
+  ok: boolean;
+  message: string;
+  fetchedCount?: number;
+}
+
+export interface BatchActionResult {
+  total: number;
+  success: number;
+  failure: number;
+  details: BatchActionDetail[];
 }
 
 export interface AuthUser {

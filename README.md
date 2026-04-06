@@ -6,6 +6,8 @@
 
 - 账号增删改查（账号、密码、client_id、refresh_token、备注）
 - 后台登录鉴权（HttpOnly Cookie 会话）
+- 内置 JS 批量刷新令牌与批量取件（Graph API）
+- 账号列表状态列展示刷新/取件结果
 - 支持外部系统上传账号到本服务：`POST /api/upload/ingest`
 - 支持两种上传数据格式：
   - `captchaurn` 行格式（如 `账号----密码----client_id----refresh_token`）
@@ -109,6 +111,43 @@ npm run deploy
   "inserted": 10,
   "skipped": 2,
   "errors": []
+}
+```
+
+## 批量刷新与取件（内置 API）
+
+后台管理端提供以下接口（需登录 Cookie）：
+
+- `POST /api/accounts/refresh`：批量刷新 refresh_token
+- `POST /api/accounts/fetch`：批量取件（Graph API）
+
+请求体示例：
+
+```json
+{
+  "accountIds": [1, 2, 3],
+  "concurrency": 8,
+  "top": 3
+}
+```
+
+说明：
+
+- `accountIds` 不传则默认处理全部账号
+- `concurrency` 并发范围 1-20
+- `top` 取件数量范围 1-20（仅取件接口使用）
+
+返回示例：
+
+```json
+{
+  "total": 2,
+  "success": 1,
+  "failure": 1,
+  "details": [
+    { "id": 1, "account": "a@example.com", "ok": true, "message": "刷新成功" },
+    { "id": 2, "account": "b@example.com", "ok": false, "message": "缺少 client_id 或 refresh_token" }
+  ]
 }
 ```
 

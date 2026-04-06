@@ -127,8 +127,37 @@
                   @keyup.enter="loadAccounts"
                 />
                 <n-tag type="info" size="small">共 {{ accounts.length }} 条</n-tag>
+                <n-tag type="warning" size="small">已选 {{ checkedRowKeys.length }} 条</n-tag>
               </div>
-              <n-button :loading="tableLoading" @click="loadAccounts">刷新</n-button>
+              <div class="list-toolbar-right">
+                <n-input-number
+                  v-model:value="fetchTop"
+                  size="small"
+                  :min="1"
+                  :max="20"
+                  :precision="0"
+                  style="width: 96px"
+                />
+                <n-button size="small" :loading="syncLoading" @click="handleRefreshAccounts(false)">
+                  刷新选中
+                </n-button>
+                <n-button size="small" :loading="syncLoading" @click="handleRefreshAccounts(true)">
+                  刷新全部
+                </n-button>
+                <n-button size="small" :loading="syncLoading" @click="handleFetchAccounts(false)">
+                  取件选中
+                </n-button>
+                <n-button
+                  size="small"
+                  type="primary"
+                  secondary
+                  :loading="syncLoading"
+                  @click="handleFetchAccounts(true)"
+                >
+                  取件全部
+                </n-button>
+                <n-button size="small" :loading="tableLoading" @click="loadAccounts">刷新列表</n-button>
+              </div>
             </div>
 
             <n-data-table
@@ -137,9 +166,11 @@
               :data="accounts"
               :row-key="rowKey"
               :loading="tableLoading"
+              :checked-row-keys="checkedRowKeys"
               :pagination="{ pageSize: 10 }"
-              :scroll-x="1320"
+              :scroll-x="1500"
               max-height="520"
+              @update:checked-row-keys="handleCheckedRowKeysUpdate"
             />
           </n-card>
         </n-space>
@@ -264,6 +295,7 @@ import {
   NGi,
   NGrid,
   NInput,
+  NInputNumber,
   NModal,
   NSpace,
   NSpin,
@@ -274,7 +306,7 @@ import {
   type DataTableColumns
 } from 'naive-ui';
 import { api, UnauthorizedError } from './api';
-import type { AccountItem, AccountPayload, IngestConfig } from './types';
+import type { AccountItem, AccountPayload, BatchActionResult, IngestConfig } from './types';
 
 const { message } = createDiscreteApi(['message']);
 
@@ -294,12 +326,15 @@ const activeTab = ref<'accounts' | 'ingest'>('accounts');
 
 const accounts = ref<AccountItem[]>([]);
 const searchKeyword = ref('');
+const checkedRowKeys = ref<number[]>([]);
+const fetchTop = ref<number | null>(3);
 
 const tableLoading = ref(false);
 const createLoading = ref(false);
 const editLoading = ref(false);
 const importLoading = ref(false);
 const saveIngestLoading = ref(false);
+const syncLoading = ref(false);
 
 const importText = ref('');
 const txtFileInputRef = ref<HTMLInputElement | null>(null);
@@ -336,7 +371,41 @@ const ingestTokenHeader = ref('x-ingest-token');
 
 const rowKey = (row: AccountItem): number => row.id;
 
+function resolveStatusLabel(row: AccountItem): string {
+  const status = row.syncStatus || 'idle';
+  if (status === 'refresh_success') {
+    return '刷新成功';
+  }
+  if (status === 'refresh_failed') {
+    return '刷新失败';
+  }
+  if (status === 'fetch_success') {
+    return `取件成功(${row.fetchedCount ?? 0})`;
+  }
+  if (status === 'fetch_failed') {
+    return '取件失败';
+  }
+  return '未处理';
+}
+
+function resolveStatusType(status: string): 'success' | 'error' | 'warning' | 'default' {
+  if (status === 'refresh_success' || status === 'fetch_success') {
+    return 'success';
+  }
+  if (status === 'refresh_failed' || status === 'fetch_failed') {
+    return 'error';
+  }
+  if (status === 'running') {
+    return 'warning';
+  }
+  return 'default';
+}
+
 const accountColumns: DataTableColumns<AccountItem> = [
+  {
+    type: 'selection',
+    width: 42
+  },
   { title: '账号', key: 'account', minWidth: 220, ellipsis: { tooltip: true } },
   { title: '密码', key: 'password', minWidth: 170, ellipsis: { tooltip: true } },
   {
@@ -359,6 +428,23 @@ const accountColumns: DataTableColumns<AccountItem> = [
     minWidth: 130,
     ellipsis: { tooltip: true },
     render: (row) => row.remark ?? '-'
+  },
+  {
+    title: '状态',
+    key: 'syncStatus',
+    minWidth: 170,
+    render: (row) =>
+      h(
+        NTag,
+        {
+          size: 'small',
+          type: resolveStatusType(row.syncStatus),
+          title: row.syncMessage ?? resolveStatusLabel(row)
+        },
+        {
+          default: () => resolveStatusLabel(row)
+        }
+      )
   },
   { title: '创建时间', key: 'createdAt', minWidth: 180, ellipsis: { tooltip: true } },
   {
@@ -433,6 +519,7 @@ function clearSessionState(): void {
   isAuthenticated.value = false;
   currentUser.value = '';
   accounts.value = [];
+  checkedRowKeys.value = [];
   editVisible.value = false;
 }
 
@@ -446,6 +533,27 @@ function handleApiError(error: unknown, showAuthWarning = true): void {
   }
 
   message.error(getErrorMessage(error));
+}
+
+function handleCheckedRowKeysUpdate(keys: Array<number | string>): void {
+  checkedRowKeys.value = keys
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
+}
+
+function getTargetAccountIds(all: boolean): number[] {
+  if (all) {
+    return [];
+  }
+  return checkedRowKeys.value;
+}
+
+function showBatchResult(prefix: string, result: BatchActionResult): void {
+  if (result.failure === 0) {
+    message.success(`${prefix}完成：成功 ${result.success}/${result.total}`);
+  } else {
+    message.warning(`${prefix}完成：成功 ${result.success}，失败 ${result.failure}`);
+  }
 }
 
 function normalizePayload(payload: Required<AccountPayload>): AccountPayload {
@@ -481,6 +589,8 @@ async function loadAccounts(): Promise<void> {
   try {
     const response = await api.listAccounts(searchKeyword.value.trim());
     accounts.value = response.items;
+    const available = new Set(response.items.map((item) => item.id));
+    checkedRowKeys.value = checkedRowKeys.value.filter((id) => available.has(id));
   } catch (error) {
     handleApiError(error);
   } finally {
@@ -655,6 +765,51 @@ async function importAccountsText(rawText: string, sourceLabel: string): Promise
 
 async function handleImport(): Promise<void> {
   await importAccountsText(importText.value, '文本内容');
+}
+
+async function handleRefreshAccounts(all: boolean): Promise<void> {
+  const accountIds = getTargetAccountIds(all);
+  if (!all && accountIds.length === 0) {
+    message.warning('请先勾选需要刷新的账号');
+    return;
+  }
+
+  syncLoading.value = true;
+  try {
+    const result = await api.refreshAccounts({
+      accountIds: all ? undefined : accountIds,
+      concurrency: 8
+    });
+    await loadAccounts();
+    showBatchResult('刷新', result);
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    syncLoading.value = false;
+  }
+}
+
+async function handleFetchAccounts(all: boolean): Promise<void> {
+  const accountIds = getTargetAccountIds(all);
+  if (!all && accountIds.length === 0) {
+    message.warning('请先勾选需要取件的账号');
+    return;
+  }
+
+  syncLoading.value = true;
+  try {
+    const result = await api.fetchAccounts({
+      accountIds: all ? undefined : accountIds,
+      top: Math.min(Math.max(Math.trunc(fetchTop.value || 3), 1), 20),
+      concurrency: 6
+    });
+    await loadAccounts();
+    showBatchResult('取件', result);
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    syncLoading.value = false;
+  }
 }
 
 async function handleSaveIngestConfig(): Promise<void> {

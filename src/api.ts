@@ -2,6 +2,7 @@ import type {
   AccountItem,
   AccountPayload,
   AuthUser,
+  BatchActionResult,
   IngestConfig,
   ImportResult
 } from './types';
@@ -109,6 +110,24 @@ export const api = {
     return request<{ item: IngestConfig }>('/api/ingest-config', {
       method: 'PUT',
       body: JSON.stringify(payload)
+    });
+  },
+
+  refreshAccounts(payload?: { accountIds?: number[]; concurrency?: number }): Promise<BatchActionResult> {
+    return request<BatchActionResult>('/api/accounts/refresh', {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {})
+    });
+  },
+
+  fetchAccounts(payload?: {
+    accountIds?: number[];
+    top?: number;
+    concurrency?: number;
+  }): Promise<BatchActionResult> {
+    return request<BatchActionResult>('/api/accounts/fetch', {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {})
     });
   }
 };

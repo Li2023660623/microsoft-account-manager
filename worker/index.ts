@@ -25,6 +25,11 @@ interface AccountRow {
   refreshToken: string | null;
   remark: string | null;
   createdAt: string;
+  syncStatus: string;
+  syncMessage: string | null;
+  refreshedAt: string | null;
+  fetchedAt: string | null;
+  fetchedCount: number;
 }
 
 interface AccountPayload {
@@ -66,10 +71,29 @@ interface ParseIncomingResult {
   errors: ParseErrorItem[];
 }
 
+interface BatchActionDetail {
+  id: number;
+  account: string;
+  ok: boolean;
+  message: string;
+  fetchedCount?: number;
+}
+
+interface TokenExchangeResult {
+  accessToken: string;
+  refreshToken: string;
+}
+
 const SESSION_COOKIE_NAME = 'am_session';
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24;
 const INGEST_TOKEN_HEADER = 'x-ingest-token';
 const INGEST_PATH = '/api/upload/ingest';
+const MICROSOFT_TOKEN_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
+const GRAPH_MESSAGES_URL = 'https://graph.microsoft.com/v1.0/me/messages';
+const GRAPH_SCOPE = 'https://graph.microsoft.com/.default';
+const DEFAULT_REFRESH_CONCURRENCY = 8;
+const DEFAULT_FETCH_CONCURRENCY = 6;
+const DEFAULT_FETCH_TOP = 3;
 
 const DEFAULT_INGEST_CONFIG: IngestConfig = {
   delimiter: '----',
@@ -88,7 +112,12 @@ const ACCOUNT_SELECT_SQL = `
     client_id AS clientId,
     refresh_token AS refreshToken,
     remark,
-    created_at AS createdAt
+    created_at AS createdAt,
+    IFNULL(sync_status, 'idle') AS syncStatus,
+    sync_message AS syncMessage,
+    refreshed_at AS refreshedAt,
+    fetched_at AS fetchedAt,
+    IFNULL(fetched_count, 0) AS fetchedCount
   FROM accounts
 `;
 
@@ -340,6 +369,57 @@ app.post('/api/accounts/import', async (c) => {
   }
 
   return c.json({ inserted, skipped, errors });
+});
+
+app.post('/api/accounts/refresh', async (c) => {
+  const body = await readJson<{ accountIds?: unknown; concurrency?: unknown }>(c);
+  const accountIds = parseAccountIds(body.accountIds);
+  const concurrency = clampInteger(body.concurrency, 1, 20, DEFAULT_REFRESH_CONCURRENCY);
+  const accounts =
+    accountIds.length > 0
+      ? await fetchAccountsByIds(c.env.DB, accountIds)
+      : await fetchAllAccounts(c.env.DB);
+
+  if (accounts.length === 0) {
+    throw new HTTPException(400, { message: '没有可刷新的账号' });
+  }
+
+  const details = await mapWithConcurrency(accounts, concurrency, (account) =>
+    refreshAccountToken(c.env.DB, account)
+  );
+  const success = details.filter((item) => item.ok).length;
+  return c.json({
+    total: details.length,
+    success,
+    failure: details.length - success,
+    details
+  });
+});
+
+app.post('/api/accounts/fetch', async (c) => {
+  const body = await readJson<{ accountIds?: unknown; concurrency?: unknown; top?: unknown }>(c);
+  const accountIds = parseAccountIds(body.accountIds);
+  const concurrency = clampInteger(body.concurrency, 1, 20, DEFAULT_FETCH_CONCURRENCY);
+  const top = clampInteger(body.top, 1, 20, DEFAULT_FETCH_TOP);
+  const accounts =
+    accountIds.length > 0
+      ? await fetchAccountsByIds(c.env.DB, accountIds)
+      : await fetchAllAccounts(c.env.DB);
+
+  if (accounts.length === 0) {
+    throw new HTTPException(400, { message: '没有可取件的账号' });
+  }
+
+  const details = await mapWithConcurrency(accounts, concurrency, (account) =>
+    fetchAccountMails(c.env.DB, account, top)
+  );
+  const success = details.filter((item) => item.ok).length;
+  return c.json({
+    total: details.length,
+    success,
+    failure: details.length - success,
+    details
+  });
 });
 
 app.get('/api/ingest-config', async (c) => {
@@ -603,6 +683,377 @@ function validateIngestConfig(config: IngestConfig): void {
       throw new HTTPException(400, { message: `字段名不合法: ${field}` });
     }
   }
+}
+
+function parseAccountIds(input: unknown): number[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const ids = input
+    .map((value) => Number.parseInt(String(value), 10))
+    .filter((value) => Number.isInteger(value) && value > 0);
+  return Array.from(new Set(ids));
+}
+
+function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = Number.parseInt(asText(value), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  if (parsed < min) {
+    return min;
+  }
+  if (parsed > max) {
+    return max;
+  }
+  return parsed;
+}
+
+async function fetchAllAccounts(db: D1Database): Promise<AccountRow[]> {
+  const { results } = await db.prepare(`${ACCOUNT_SELECT_SQL} ORDER BY id DESC`).all<AccountRow>();
+  return results ?? [];
+}
+
+async function fetchAccountsByIds(db: D1Database, ids: number[]): Promise<AccountRow[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const statement = db
+    .prepare(`${ACCOUNT_SELECT_SQL} WHERE id IN (${placeholders}) ORDER BY id DESC`)
+    .bind(...ids);
+  const { results } = await statement.all<AccountRow>();
+  return results ?? [];
+}
+
+async function refreshAccountToken(db: D1Database, account: AccountRow): Promise<BatchActionDetail> {
+  if (!account.clientId || !account.refreshToken) {
+    const message = '缺少 client_id 或 refresh_token';
+    await updateSyncStatus(db, account.id, {
+      status: 'refresh_failed',
+      message,
+      touchRefresh: true,
+      touchFetch: false,
+      fetchedCount: account.fetchedCount
+    });
+    return {
+      id: account.id,
+      account: account.account,
+      ok: false,
+      message
+    };
+  }
+
+  const exchanged = await exchangeMicrosoftToken(account.refreshToken, account.clientId);
+  if (!exchanged.ok) {
+    const message = exchanged.error || '刷新失败';
+    await updateSyncStatus(db, account.id, {
+      status: 'refresh_failed',
+      message,
+      touchRefresh: true,
+      touchFetch: false,
+      fetchedCount: account.fetchedCount
+    });
+    return {
+      id: account.id,
+      account: account.account,
+      ok: false,
+      message
+    };
+  }
+
+  const tokenResult = exchanged.result;
+
+  const newRefreshToken = tokenResult.refreshToken || account.refreshToken;
+  await db
+    .prepare('UPDATE accounts SET refresh_token = ? WHERE id = ?')
+    .bind(newRefreshToken, account.id)
+    .run();
+
+  const message = '刷新成功';
+  await updateSyncStatus(db, account.id, {
+    status: 'refresh_success',
+    message,
+    touchRefresh: true,
+    touchFetch: false,
+    fetchedCount: account.fetchedCount
+  });
+
+  return {
+    id: account.id,
+    account: account.account,
+    ok: true,
+    message
+  };
+}
+
+async function fetchAccountMails(db: D1Database, account: AccountRow, top: number): Promise<BatchActionDetail> {
+  if (!account.clientId || !account.refreshToken) {
+    const message = '缺少 client_id 或 refresh_token';
+    await updateSyncStatus(db, account.id, {
+      status: 'fetch_failed',
+      message,
+      touchRefresh: false,
+      touchFetch: true,
+      fetchedCount: 0
+    });
+    return {
+      id: account.id,
+      account: account.account,
+      ok: false,
+      message,
+      fetchedCount: 0
+    };
+  }
+
+  const exchanged = await exchangeMicrosoftToken(account.refreshToken, account.clientId, GRAPH_SCOPE);
+  if (!exchanged.ok) {
+    const message = exchanged.error || '取件前刷新令牌失败';
+    await updateSyncStatus(db, account.id, {
+      status: 'fetch_failed',
+      message,
+      touchRefresh: true,
+      touchFetch: true,
+      fetchedCount: 0
+    });
+    return {
+      id: account.id,
+      account: account.account,
+      ok: false,
+      message,
+      fetchedCount: 0
+    };
+  }
+
+  const tokenResult = exchanged.result;
+
+  const newRefreshToken = tokenResult.refreshToken || account.refreshToken;
+  await db
+    .prepare('UPDATE accounts SET refresh_token = ? WHERE id = ?')
+    .bind(newRefreshToken, account.id)
+    .run();
+
+  const fetched = await readGraphMessages(tokenResult.accessToken, top);
+  if (!fetched.ok) {
+    const message = fetched.error || 'Graph 取件失败';
+    await updateSyncStatus(db, account.id, {
+      status: 'fetch_failed',
+      message,
+      touchRefresh: true,
+      touchFetch: true,
+      fetchedCount: 0
+    });
+    return {
+      id: account.id,
+      account: account.account,
+      ok: false,
+      message,
+      fetchedCount: 0
+    };
+  }
+
+  const fetchedCount = fetched.messages.length;
+  const message = `取件成功，共 ${fetchedCount} 封`;
+  await updateSyncStatus(db, account.id, {
+    status: 'fetch_success',
+    message,
+    touchRefresh: true,
+    touchFetch: true,
+    fetchedCount
+  });
+
+  return {
+    id: account.id,
+    account: account.account,
+    ok: true,
+    message,
+    fetchedCount
+  };
+}
+
+async function exchangeMicrosoftToken(
+  refreshToken: string,
+  clientId: string,
+  scope = ''
+): Promise<{ ok: true; result: TokenExchangeResult } | { ok: false; error: string }> {
+  const params = new URLSearchParams();
+  params.set('client_id', clientId);
+  params.set('grant_type', 'refresh_token');
+  params.set('refresh_token', refreshToken);
+  if (scope) {
+    params.set('scope', scope);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(MICROSOFT_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params.toString()
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: `刷新请求异常: ${error instanceof Error ? error.message : 'unknown error'}`
+    };
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: extractMicrosoftError(payload, response.status)
+    };
+  }
+
+  const accessToken = asText((payload as Record<string, unknown>).access_token).trim();
+  if (!accessToken) {
+    return {
+      ok: false,
+      error: '刷新响应缺少 access_token'
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      accessToken,
+      refreshToken: asText((payload as Record<string, unknown>).refresh_token).trim()
+    }
+  };
+}
+
+async function readGraphMessages(
+  accessToken: string,
+  top: number
+): Promise<{ ok: true; messages: Array<Record<string, unknown>> } | { ok: false; error: string }> {
+  const url = new URL(GRAPH_MESSAGES_URL);
+  url.searchParams.set('$top', String(top));
+  url.searchParams.set('$orderby', 'receivedDateTime desc');
+  url.searchParams.set('$select', 'subject,from,receivedDateTime,bodyPreview');
+
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Graph请求异常: ${error instanceof Error ? error.message : 'unknown error'}`
+    };
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: extractMicrosoftError(payload, response.status)
+    };
+  }
+
+  const value = (payload as Record<string, unknown>).value;
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      error: 'Graph响应格式错误，缺少value数组'
+    };
+  }
+
+  return {
+    ok: true,
+    messages: value.filter((item) => !!item && typeof item === 'object') as Array<Record<string, unknown>>
+  };
+}
+
+function extractMicrosoftError(payload: unknown, status: number): string {
+  if (payload && typeof payload === 'object') {
+    const asRecord = payload as Record<string, unknown>;
+    const direct = asText(asRecord.error_description || asRecord.error).trim();
+    if (direct) {
+      return `请求失败(${status}): ${direct}`;
+    }
+
+    const nested = asRecord.error;
+    if (nested && typeof nested === 'object') {
+      const nestedRecord = nested as Record<string, unknown>;
+      const message = asText(nestedRecord.message).trim();
+      if (message) {
+        return `请求失败(${status}): ${message}`;
+      }
+    }
+  }
+
+  return `请求失败(${status})`;
+}
+
+async function updateSyncStatus(
+  db: D1Database,
+  accountId: number,
+  params: {
+    status: string;
+    message: string;
+    touchRefresh: boolean;
+    touchFetch: boolean;
+    fetchedCount: number;
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE accounts
+       SET
+         sync_status = ?,
+         sync_message = ?,
+         refreshed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE refreshed_at END,
+         fetched_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE fetched_at END,
+         fetched_count = ?
+       WHERE id = ?`
+    )
+    .bind(
+      params.status,
+      truncate(params.message, 600),
+      params.touchRefresh ? 1 : 0,
+      params.touchFetch ? 1 : 0,
+      params.fetchedCount,
+      accountId
+    )
+    .run();
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const size = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  const workers = Array.from({ length: size }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) {
+        break;
+      }
+
+      results[index] = await mapper(items[index], index);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
 function parseIncomingPayload(input: unknown, config: IngestConfig): ParseIncomingResult {
