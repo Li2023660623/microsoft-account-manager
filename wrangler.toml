@@ -1,4 +1,4 @@
-name = "cf-account-manager"
+name = "microsoft-account-manager"
 main = "worker/index.ts"
 compatibility_date = "2026-04-06"
 workers_dev = true
@@ -11,7 +11,7 @@ ADMIN_USERNAME = "admin"
 [[d1_databases]]
 binding = "DB"
 database_name = "account_manager_db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "7c6500bb-37c1-4a0c-9586-1b1563cddec2"
 
 [observability]
 enabled = true
