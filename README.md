@@ -106,20 +106,37 @@ database_name = "account_manager_db"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 ```
 
-### 2) 设置部署变量（推荐）
+### 2) Cloudflare 构建配置（Git 集成部署）
 
-在 Cloudflare 项目里新增环境变量（非 Secret）：
+在 Cloudflare 的 **构建** 页面建议使用：
 
-- `D1_DATABASE_ID` = 你的真实 database_id
+- 构建命令：`npm run build`
+- 部署命令：`npm run deploy:cf`
+- 版本命令：`npx wrangler versions upload`（可选）
 
-部署时脚本会自动生成临时配置 `.wrangler.deploy.toml`，并替换占位符。
+并在 **构建 > 变量和机密** 中添加你截图里的这些变量：
 
-### 3) 配置 Secrets
+- `D1_DATABASE_ID`：D1 数据库真实 ID（必须）
+- `ADMIN_PASSWORD`：后台登录密码（必须）
+- `SESSION_SECRET`：会话签名密钥（必须）
+- `INGEST_TOKEN`：外部上传接口令牌（必须）
+- `ADMIN_USERNAME`：后台用户名（可选，默认 `admin`）
 
-```bash
-wrangler secret put ADMIN_PASSWORD
-wrangler secret put SESSION_SECRET
-wrangler secret put INGEST_TOKEN
+部署时 `prepare:cf-config` 会自动生成临时 `.wrangler.deploy.toml`，并注入以上变量到部署配置。
+
+### 3) 本地 CLI 部署（可选）
+
+如果你不用 Cloudflare Git 构建，而是本地命令部署：
+
+PowerShell 示例：
+
+```powershell
+$env:D1_DATABASE_ID = "your-d1-database-id"
+$env:ADMIN_PASSWORD = "your-admin-password"
+$env:SESSION_SECRET = "your-session-secret"
+$env:INGEST_TOKEN = "your-ingest-token"
+$env:ADMIN_USERNAME = "admin"
+npm run deploy
 ```
 
 ### 4) 迁移 + 部署
@@ -130,25 +147,11 @@ npm run deploy
 
 脚本说明：
 
-- `npm run prepare:cf-config`：根据 `D1_DATABASE_ID` 生成 `.wrangler.deploy.toml`
+- `npm run prepare:cf-config`：读取构建变量并生成 `.wrangler.deploy.toml`
 - `npm run migrate:local`：执行本地 D1 迁移
 - `npm run migrate:remote`：执行远程 D1 迁移
 - `npm run deploy:cf`：迁移 + wrangler deploy
 - `npm run deploy`：先构建前端，再执行 deploy:cf
-
-如果用 Cloudflare 页面构建：
-
-- 构建命令：`npm run build`
-- 部署命令：`npm run deploy:cf`
-
-如果你在本地 CLI 手动部署，也可以先设置环境变量再执行：
-
-PowerShell:
-
-```powershell
-$env:D1_DATABASE_ID = "your-d1-database-id"
-npm run deploy
-```
 
 ---
 
