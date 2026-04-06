@@ -1,0 +1,27 @@
+{
+  "name": "cf-account-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "wrangler dev --local",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.8.2",
+    "katex": "^0.16.11",
+    "naive-ui": "^2.40.3",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241011.0",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.10",
+    "vue-tsc": "^2.2.8",
+    "wrangler": "^4.9.0"
+  }
+}
