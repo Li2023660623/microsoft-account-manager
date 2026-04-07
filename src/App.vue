@@ -142,6 +142,17 @@
                 <n-button size="small" :loading="syncLoading" @click="handleRefreshAccounts(true)">
                   刷新全部
                 </n-button>
+                <n-button size="small" @click="handleSelectAll">全选</n-button>
+                <n-button size="small" @click="handleSelectInverse">反选</n-button>
+                <n-button 
+                  size="small" 
+                  type="error" 
+                  :loading="batchDeleteLoading"
+                  :disabled="checkedRowKeys.length === 0"
+                  @click="handleBatchDelete"
+                >
+                  批量删除
+                </n-button>
                 <n-button size="small" :loading="tableLoading" @click="loadAccounts">刷新列表</n-button>
               </div>
             </div>
@@ -431,6 +442,7 @@ const editLoading = ref(false);
 const importLoading = ref(false);
 const saveIngestLoading = ref(false);
 const syncLoading = ref(false);
+const batchDeleteLoading = ref(false);
 
 const importText = ref('');
 const txtFileInputRef = ref<HTMLInputElement | null>(null);
@@ -1015,6 +1027,48 @@ async function handleRefreshAccounts(all: boolean): Promise<void> {
     handleApiError(error);
   } finally {
     syncLoading.value = false;
+  }
+}
+
+function handleSelectAll(): void {
+  checkedRowKeys.value = accounts.value.map((item) => item.id);
+  message.success(`已选中 ${checkedRowKeys.value.length} 条账号`);
+}
+
+function handleSelectInverse(): void {
+  const currentIds = new Set(checkedRowKeys.value);
+  checkedRowKeys.value = accounts.value
+    .map((item) => item.id)
+    .filter((id) => !currentIds.has(id));
+  message.success(`反选完成，已选中 ${checkedRowKeys.value.length} 条账号`);
+}
+
+async function handleBatchDelete(): Promise<void> {
+  if (checkedRowKeys.value.length === 0) {
+    message.warning('请先选择要删除的账号');
+    return;
+  }
+
+  const confirmed = window.confirm(`确认删除选中的 ${checkedRowKeys.value.length} 条账号？此操作不可恢复！`);
+  if (!confirmed) {
+    return;
+  }
+
+  batchDeleteLoading.value = true;
+  try {
+    const result = await api.batchDeleteAccounts({
+      accountIds: checkedRowKeys.value
+    });
+    await loadAccounts();
+    if (result.deleted > 0) {
+      message.success(`删除完成：成功删除 ${result.deleted}/${result.total} 条`);
+    } else {
+      message.warning('没有账号被删除');
+    }
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    batchDeleteLoading.value = false;
   }
 }
 

@@ -325,6 +325,28 @@ app.delete('/api/accounts/:id', async (c) => {
   return c.json({ ok: true as const });
 });
 
+app.post('/api/accounts/batch-delete', async (c) => {
+  const body = await readJson<{ accountIds?: unknown }>(c);
+  const accountIds = parseAccountIds(body.accountIds);
+  
+  if (accountIds.length === 0) {
+    throw new HTTPException(400, { message: '请选择要删除的账号' });
+  }
+
+  const placeholders = accountIds.map(() => '?').join(',');
+  const result = await c.env.DB
+    .prepare(`DELETE FROM accounts WHERE id IN (${placeholders})`)
+    .bind(...accountIds)
+    .run();
+
+  const deleted = result.meta.changes ?? 0;
+  return c.json({
+    total: accountIds.length,
+    deleted,
+    skipped: accountIds.length - deleted
+  });
+});
+
 app.patch('/api/accounts/:id/remark', async (c) => {
   const id = parseNumericId(c.req.param('id'));
   const body = await readJson<{ remark?: unknown }>(c);

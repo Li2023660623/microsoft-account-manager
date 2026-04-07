@@ -129,6 +129,17 @@ export const api = {
     });
   },
 
+  batchDeleteAccounts(payload: { accountIds: number[] }): Promise<{
+    total: number;
+    deleted: number;
+    skipped: number;
+  }> {
+    return request<{ total: number; deleted: number; skipped: number }>('/api/accounts/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
   getAccountMessages(
     id: number,
     mode: MailFetchMode
