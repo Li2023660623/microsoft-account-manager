@@ -156,6 +156,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .alias-popover-header {
@@ -192,11 +194,15 @@ body {
 
 .alias-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) 60px 72px 50px;
   align-items: center;
   gap: 6px;
   padding-bottom: 6px;
   border-bottom: 1px dashed rgba(22, 52, 71, 0.14);
+}
+
+.alias-row > * {
+  min-width: 0;
 }
 
 .alias-row:last-child {
@@ -216,6 +222,13 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.alias-status-tag,
+.alias-toggle-btn,
+.alias-copy-btn {
+  width: 100%;
+  justify-content: center;
 }
 
 .mail-modal-wrapper {

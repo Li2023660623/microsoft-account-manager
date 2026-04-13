@@ -558,13 +558,13 @@ const rowKey = (row: AccountItem): number => row.id;
 function resolveStatusLabel(row: AccountItem): string {
   const status = row.syncStatus || 'idle';
   if (status === 'refresh_success') {
-    return '刷新成功';
+    return '刷新OK';
   }
   if (status === 'refresh_failed') {
     return '刷新失败';
   }
   if (status === 'fetch_success') {
-    return `取件成功(${row.fetchedCount ?? 0})`;
+    return `取件(${row.fetchedCount ?? 0})`;
   }
   if (status === 'fetch_failed') {
     return '取件失败';
@@ -636,7 +636,7 @@ const accountColumns: DataTableColumns<AccountItem> = [
   {
     title: '状态',
     key: 'syncStatus',
-    minWidth: 130,
+    width: 98,
     render: (row) =>
       h(
         NTag,
@@ -654,7 +654,7 @@ const accountColumns: DataTableColumns<AccountItem> = [
   {
     title: '操作',
     key: 'actions',
-    width: 220,
+    width: 230,
     fixed: 'right',
     render: (row) =>
       h('div', { class: 'action-cell' }, [
@@ -667,6 +667,16 @@ const accountColumns: DataTableColumns<AccountItem> = [
             onClick: () => openEditModal(row)
           },
           { default: () => '编辑' }
+        ),
+        h(
+          NButton,
+          {
+            size: 'small',
+            quaternary: true,
+            type: 'error',
+            onClick: () => handleDeleteAccount(row.id)
+          },
+          { default: () => '删除' }
         ),
         h(
           NPopover,
@@ -695,16 +705,6 @@ const accountColumns: DataTableColumns<AccountItem> = [
               ),
             default: () => renderAliasPopoverContent(row)
           }
-        ),
-        h(
-          NButton,
-          {
-            size: 'small',
-            quaternary: true,
-            type: 'error',
-            onClick: () => handleDeleteAccount(row.id)
-          },
-          { default: () => '删除' }
         )
       ])
   }
@@ -1109,6 +1109,7 @@ function renderAliasPopoverContent(row: AccountItem) {
                 h(
                   NTag,
                   {
+                    class: 'alias-status-tag',
                     size: 'small',
                     type: resolveAliasStatusType(alias.isRegistered)
                   },
@@ -1120,6 +1121,7 @@ function renderAliasPopoverContent(row: AccountItem) {
                     size: 'tiny',
                     quaternary: true,
                     type: alias.isRegistered ? 'warning' : 'success',
+                    class: 'alias-toggle-btn',
                     loading: aliasStatusLoadingByAliasId[alias.id] ?? false,
                     onClick: (event: MouseEvent) => {
                       event.stopPropagation();
@@ -1132,6 +1134,7 @@ function renderAliasPopoverContent(row: AccountItem) {
                   NButton,
                   {
                     size: 'tiny',
+                    class: 'alias-copy-btn',
                     onClick: (event: MouseEvent) => {
                       event.stopPropagation();
                       void handleCopyText(alias.aliasEmail);
