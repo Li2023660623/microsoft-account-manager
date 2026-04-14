@@ -165,7 +165,7 @@
               :loading="tableLoading"
               :checked-row-keys="checkedRowKeys"
               :pagination="tablePagination"
-              :scroll-x="1500"
+              :scroll-x="1260"
               max-height="520"
               @update:checked-row-keys="handleCheckedRowKeysUpdate"
             />
@@ -604,7 +604,7 @@ const accountColumns: DataTableColumns<AccountItem> = [
   {
     title: '账号',
     key: 'account',
-    minWidth: 100,
+    width: 190,
     ellipsis: { tooltip: true },
     render: (row) =>
       h(
@@ -622,25 +622,25 @@ const accountColumns: DataTableColumns<AccountItem> = [
         }
       )
   },
-  { title: '密码', key: 'password', minWidth: 100, ellipsis: { tooltip: true } },
+  { title: '密码', key: 'password', width: 110, ellipsis: { tooltip: true } },
   {
     title: 'Client ID',
     key: 'clientId',
-    minWidth: 80,
+    width: 160,
     ellipsis: { tooltip: true },
     render: (row) => row.clientId ?? '-'
   },
   {
     title: 'Refresh Token',
     key: 'refreshToken',
-    minWidth: 80,
+    width: 170,
     ellipsis: { tooltip: true },
     render: (row) => row.refreshToken ?? '-'
   },
   {
     title: '备注',
     key: 'remark',
-    minWidth: 80,
+    width: 96,
     ellipsis: { tooltip: true },
     render: (row) => row.remark ?? '-'
   },
@@ -661,11 +661,11 @@ const accountColumns: DataTableColumns<AccountItem> = [
         }
       )
   },
-  { title: '创建时间', key: 'createdAt', minWidth: 120, ellipsis: { tooltip: true } },
+  { title: '创建时间', key: 'createdAt', width: 165, ellipsis: { tooltip: true } },
   {
     title: '操作',
     key: 'actions',
-    width: 250,
+    width: 240,
     fixed: 'right',
     render: (row) =>
       h('div', { class: 'action-cell' }, [
