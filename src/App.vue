@@ -1023,10 +1023,7 @@ function resolveAliasProgressText(row: AccountItem): string {
   if (total <= 0) {
     return '(0/0)';
   }
-  if (registered > 0) {
-    return `(${total}/${total})`;
-  }
-  return `(0/${total})`;
+  return `(${registered}/${total})`;
 }
 
 function resolveAliasStatusType(isRegistered: boolean): 'success' | 'warning' {
